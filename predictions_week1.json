@@ -1,0 +1,32 @@
+[
+  {
+    "game": "Black Myth: Wukong",
+    "predicted_views": 1571,
+    "range_low": 472,
+    "range_high": 5218
+  },
+  {
+    "game": "Hot Wheels Unleashed",
+    "predicted_views": 1911,
+    "range_low": 574,
+    "range_high": 6348
+  },
+  {
+    "game": "Dying Light 2",
+    "predicted_views": 1219,
+    "range_low": 366,
+    "range_high": 4050
+  },
+  {
+    "game": "Kingdom Come Deliverance",
+    "predicted_views": 2863,
+    "range_low": 861,
+    "range_high": 9510
+  },
+  {
+    "game": "Death Stranding",
+    "predicted_views": 4822,
+    "range_low": 1451,
+    "range_high": 16012
+  }
+]
