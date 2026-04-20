@@ -1,0 +1,56 @@
+name: Daily Dashboard Update
+
+on:
+  schedule:
+    # 04:00 UTC = 00:00 Chile (medianoche)
+    # Todos los días
+    - cron: '0 4 * * *'
+  workflow_dispatch:  # permite ejecutar manualmente
+
+permissions:
+  contents: write
+
+jobs:
+  update-dashboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pandas numpy google-api-python-client google-auth-oauthlib google-auth-httplib2 isodate thefuzz openpyxl tqdm xgboost scikit-learn
+
+      - name: Restore YouTube API token
+        env:
+          YOUTUBE_TOKEN_B64: ${{ secrets.YOUTUBE_TOKEN_B64 }}
+        run: |
+          echo "$YOUTUBE_TOKEN_B64" | base64 -d > token.pickle
+
+      - name: Extract latest channel data
+        run: python data_collector.py
+
+      - name: Categorize videos
+        run: python categorizer.py
+
+      - name: Audit and clean data
+        run: python audit_validator.py
+
+      - name: Rebuild dashboard
+        run: python rebuild_dashboard.py
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          rm -f token.pickle
+          git add strategic_data.json strategic_dashboard.html videos_raw_data.csv videos_categorized.csv
+          git diff --staged --quiet || git commit -m "Auto: Daily data refresh $(date +%Y-%m-%d)"
+          git push
