@@ -267,19 +267,14 @@ def generate_weekly_recommendations():
 
     # 7. Inyectar en strategic_dashboard.html y push
     print("\nActualizando dashboard...")
-    subprocess.run(
-        ["python3", "rebuild_dashboard.py"],
-        cwd="/Users/benjamin/Desktop/YT Gaming CLI",
-    )
+    subprocess.run(["python3", "rebuild_dashboard.py"])
+    # Note: git commit and push are handled by GitHub Actions workflow
+    # When run locally, uncomment the lines below:
+    # subprocess.run(["git", "add", "strategic_dashboard.html", "strategic_data.json"])
+    # subprocess.run(["git", "commit", "-m", f"Auto: Weekly calendar {next_monday.strftime('%Y-%m-%d')}"])
+    # subprocess.run(["git", "push"])
 
-    # 8. Git commit + push
-    os.chdir("/Users/benjamin/Desktop/YT Gaming CLI")
-    subprocess.run(["git", "add", "strategic_dashboard.html", "strategic_data.json"])
-    msg = f"Auto: Weekly calendar {next_monday.strftime('%Y-%m-%d')}"
-    subprocess.run(["git", "commit", "-m", msg])
-    subprocess.run(["git", "push"])
-
-    print(f"\n✓ Commit + push completado")
+    print(f"\n✓ Files updated: strategic_data.json + strategic_dashboard.html")
     print("=" * 60)
 
 
