@@ -1,0 +1,49 @@
+name: Weekly Calendar Recommender
+
+on:
+  schedule:
+    # 20:00 UTC = 16:00 Chile (horario de verano UTC-4)
+    # Todos los domingos
+    - cron: '0 20 * * 0'
+  workflow_dispatch:  # permite ejecutar manualmente desde la pestaña Actions
+
+permissions:
+  contents: write  # necesario para hacer commit y push
+
+jobs:
+  generate-calendar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pandas numpy google-api-python-client google-auth-oauthlib google-auth-httplib2
+
+      - name: Restore YouTube API token
+        env:
+          YOUTUBE_TOKEN_B64: ${{ secrets.YOUTUBE_TOKEN_B64 }}
+        run: |
+          echo "$YOUTUBE_TOKEN_B64" | base64 -d > token.pickle
+
+      - name: Run weekly recommender
+        run: python weekly_recommender.py
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Remove token.pickle so it's never committed
+          rm -f token.pickle
+          git add strategic_data.json strategic_dashboard.html
+          git diff --staged --quiet || git commit -m "Auto: Weekly calendar $(date +%Y-%m-%d)"
+          git push
