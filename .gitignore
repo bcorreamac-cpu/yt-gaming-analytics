@@ -1,10 +1,25 @@
-__pycache__/
-yt-analytics/
-token.pickle
-client_secret*.json
-*.pyc
+# --- Credentials & secrets (NUNCA commitear esto) ---
+token*
+*.pickle
+client_secret*
+*_b64.txt
+*_b64
+.env
+.env.*
+*.env
+credentials*
+secrets*
+*.pem
+*.key
+*.p12
+service_account*.json
 
-# Temp/build files
+# --- Python ---
+__pycache__/
+*.pyc
+yt-analytics/
+
+# --- Temp/build files ---
 _app.js
 _app_sections.js
 _dashboard.js
@@ -13,5 +28,12 @@ dashboard_data.json
 games_by_genre.json
 strategic_dashboard_v3.html
 
-# Weekly reports (generated)
+# --- Excel temp lock files ---
+~$*.xlsx
+~$*.xls
+
+# --- macOS ---
+.DS_Store
+
+# --- Weekly reports (generated por recommender) ---
 weekly_reports/
