@@ -42,7 +42,7 @@ EMAIL_FROM = os.environ.get("EMAIL_FROM") or "Joy Of Gaming <onboarding@resend.d
 
 DASHBOARD_URL = (
     os.environ.get("DASHBOARD_URL")
-    or "https://bcorreamac-cpu.github.io/yt-gaming-analytics/strategic_dashboard.html"
+    or "https://yt-gaming-analytics.pages.dev/strategic_dashboard.html"
 )
 
 # Override para correr el auditor con un rango histórico en lugar de la semana pasada.
