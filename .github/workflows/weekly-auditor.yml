@@ -1,0 +1,57 @@
+name: Weekly Auditor
+
+on:
+  schedule:
+    # 14:00 UTC Lunes = 10:00 Chile (verano UTC-4) → audita la semana Lun-Dom anterior
+    - cron: '0 14 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pandas numpy requests google-api-python-client google-auth-oauthlib google-auth-httplib2 isodate
+
+      - name: Restore YouTube API token
+        env:
+          YOUTUBE_TOKEN_B64: ${{ secrets.YOUTUBE_TOKEN_B64 }}
+        run: |
+          echo "$YOUTUBE_TOKEN_B64" | base64 -d > token.pickle
+
+      - name: Run weekly auditor
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
+        run: python weekly_auditor.py
+
+      - name: Rebuild dashboard
+        run: python rebuild_dashboard.py
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          rm -f token.pickle
+          mkdir -p weekly_audits
+          git add strategic_data.json strategic_dashboard.html weekly_audits/
+          git diff --staged --quiet || git commit -m "Auto: Weekly audit $(date +%Y-%m-%d)"
+          git push

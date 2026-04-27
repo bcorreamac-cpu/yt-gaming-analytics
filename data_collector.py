@@ -174,7 +174,7 @@ def get_video_details(youtube, video_ids):
 
         resp = api_call_with_backoff(
             lambda ids=ids_str: youtube.videos().list(
-                part="snippet,contentDetails,statistics",
+                part="snippet,contentDetails,statistics,status",
                 id=ids,
             ).execute()
         )
@@ -183,6 +183,7 @@ def get_video_details(youtube, video_ids):
             snippet = item["snippet"]
             stats = item.get("statistics", {})
             content = item["contentDetails"]
+            status = item.get("status", {})
 
             title = snippet.get("title", "")
             duration_sec = parse_duration(content.get("duration", "PT0S"))
@@ -191,6 +192,12 @@ def get_video_details(youtube, video_ids):
             if duration_sec < 60:
                 continue
             if re.search(r"#[Ss]horts", title):
+                continue
+
+            # Filtrar videos no públicos: privados, unlisted, deleted, fallidos
+            if status.get("privacyStatus") != "public":
+                continue
+            if status.get("uploadStatus") != "processed":
                 continue
 
             thumbnails = snippet.get("thumbnails", {})
@@ -264,8 +271,12 @@ def get_analytics_metrics(analytics, channel_id, video_id, start_date, end_date)
             row2 = resp2["rows"][0]
             headers2 = [col["name"] for col in resp2["columnHeaders"]]
             result.update(dict(zip(headers2, row2)))
-    except HttpError:
-        pass  # Impressions no disponible para este video, continuar sin ellas
+    except HttpError as e:
+        # Loggear primer error para diagnóstico (antes era silent)
+        if not hasattr(get_analytics_metrics, "_ctr_err_logged"):
+            print(f"\n  [CTR debug] HttpError en impressions/CTR para {video_id}: "
+                  f"status={e.resp.status}, content={e.content[:200] if e.content else 'empty'}")
+            get_analytics_metrics._ctr_err_logged = True
 
     return result
 
