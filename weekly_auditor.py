@@ -34,14 +34,20 @@ from google.auth.transport.requests import Request
 CHILE_TZ = timezone(timedelta(hours=-4))
 TOKEN_FILE = "token.pickle"
 
-RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
-EMAIL_TO = os.environ.get("EMAIL_TO", "bcorreamac@gmail.com")
-EMAIL_FROM = os.environ.get("EMAIL_FROM", "onboarding@resend.dev")
+# `os.environ.get(..., default)` returns "" (no el default) cuando el secret existe
+# pero está vacío en GitHub Actions. Usamos `or` para cubrir ambos casos.
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY") or ""
+EMAIL_TO = os.environ.get("EMAIL_TO") or "bcorreamac@gmail.com"
+EMAIL_FROM = os.environ.get("EMAIL_FROM") or "Joy Of Gaming <onboarding@resend.dev>"
 
-DASHBOARD_URL = os.environ.get(
-    "DASHBOARD_URL",
-    "https://bcorreamac-cpu.github.io/yt-gaming-analytics/strategic_dashboard.html",
+DASHBOARD_URL = (
+    os.environ.get("DASHBOARD_URL")
+    or "https://bcorreamac-cpu.github.io/yt-gaming-analytics/strategic_dashboard.html"
 )
+
+# Override para correr el auditor con un rango histórico en lugar de la semana pasada.
+CUSTOM_START_DATE = (os.environ.get("CUSTOM_START_DATE") or "").strip()
+CUSTOM_END_DATE = (os.environ.get("CUSTOM_END_DATE") or "").strip()
 
 BASELINE_DAYS = 90       # ventana del baseline
 EXCLUDE_RECENT_DAYS = 14 # excluir videos muy nuevos del baseline
@@ -70,7 +76,19 @@ def get_services():
 # ---------------------------------------------------------------------------
 
 def previous_week_range(now_chile=None):
-    """Devuelve (lunes 00:00, domingo 23:59) de la semana anterior en Chile time."""
+    """Devuelve (lunes 00:00, domingo 23:59) de la semana anterior en Chile time.
+
+    Si CUSTOM_START_DATE y CUSTOM_END_DATE están seteadas, las usa en lugar
+    de calcular automáticamente. Formato: YYYY-MM-DD.
+    """
+    if CUSTOM_START_DATE and CUSTOM_END_DATE:
+        start = datetime.strptime(CUSTOM_START_DATE, "%Y-%m-%d").replace(
+            hour=0, minute=0, second=0, microsecond=0, tzinfo=CHILE_TZ)
+        end = datetime.strptime(CUSTOM_END_DATE, "%Y-%m-%d").replace(
+            hour=23, minute=59, second=59, microsecond=0, tzinfo=CHILE_TZ)
+        print(f"[custom range] {start.date()} → {end.date()}")
+        return start, end
+
     now = now_chile or datetime.now(CHILE_TZ)
     # weekday(): Monday=0 ... Sunday=6
     days_since_monday = now.weekday()
@@ -186,20 +204,8 @@ def get_video_metrics(analytics, channel_id, video_id, start_date, end_date):
     except HttpError as e:
         print(f"  [warn] metrics q1 {video_id}: {e.resp.status}")
 
-    # Q2: impressions + CTR
-    try:
-        r = analytics.reports().query(
-            ids=f"channel=={channel_id}",
-            startDate=start_date,
-            endDate=end_date,
-            metrics="impressions,impressionsClickThroughRate",
-            filters=f"video=={video_id}",
-        ).execute()
-        if r.get("rows"):
-            headers = [c["name"] for c in r["columnHeaders"]]
-            out.update(dict(zip(headers, r["rows"][0])))
-    except HttpError as e:
-        print(f"  [warn] CTR q2 {video_id}: {e.resp.status} {(e.content or b'')[:120]}")
+    # Q2 individual: omitido — `impressions` no acepta `filters=video==X`.
+    # En su lugar usamos `fetch_impressions_bulk()` después del loop principal.
 
     # Q3: retention curve (primer 30s)
     try:
@@ -221,6 +227,36 @@ def get_video_metrics(analytics, channel_id, video_id, start_date, end_date):
     except HttpError:
         pass
 
+    return out
+
+
+def fetch_impressions_bulk(analytics, channel_id, start_date, end_date, max_results=200):
+    """Bulk fetch de impressions+CTR via dimensions=video.
+
+    `impressions` no permite `filters=video==X` (error 400). En su lugar,
+    se pide la lista por dimensión y luego se matchea por video_id.
+    Retorna dict {video_id: {"impressions": int, "ctr": float}}.
+    """
+    out = {}
+    try:
+        r = analytics.reports().query(
+            ids=f"channel=={channel_id}",
+            startDate=start_date,
+            endDate=end_date,
+            metrics="impressions,impressionsClickThroughRate",
+            dimensions="video",
+            sort="-impressions",
+            maxResults=max_results,
+        ).execute()
+        for row in r.get("rows", []):
+            vid = row[0]
+            out[vid] = {
+                "impressions": int(row[1] or 0),
+                "impressionsClickThroughRate": float(row[2] or 0),
+            }
+    except HttpError as e:
+        print(f"  [warn] bulk impressions fetch: {e.resp.status} "
+              f"{(e.content or b'')[:200]}")
     return out
 
 
@@ -358,14 +394,20 @@ def analyze_video(video, score):
 def compute_aggregates(videos, scores, baseline):
     if not videos:
         return {}
+    def safe_mean(vals):
+        vals = [v for v in vals if v and v > 0]
+        return float(np.mean(vals)) if vals else 0.0
+
     total_views = sum(v["views"] for v in videos)
     total_subs = sum(v.get("subscribersGained", 0) for v in videos)
-    avg_avd = np.mean([s["avd"] for s in scores if s["avd"] > 0]) if scores else 0
-    avg_avp = np.mean([s["avp"] for s in scores if s["avp"] > 0]) if scores else 0
-    avg_ctr = np.mean([s["ctr"] for s in scores if s["ctr"] > 0]) if scores else 0
-    avg_eng = np.mean([s["engagement"] for s in scores]) if scores else 0
-    avg_vpd = np.mean([s["views_per_day"] for s in scores]) if scores else 0
+    avg_avd = safe_mean([s["avd"] for s in scores])
+    avg_avp = safe_mean([s["avp"] for s in scores])
+    avg_ctr = safe_mean([s["ctr"] for s in scores])
+    avg_eng = safe_mean([s["engagement"] for s in scores])
+    avg_vpd = safe_mean([s["views_per_day"] for s in scores])
     peer_avg_vpd = baseline["views_per_day"].median() if len(baseline) else 0
+    if pd.isna(peer_avg_vpd):
+        peer_avg_vpd = 0
 
     return {
         "video_count": len(videos),
@@ -680,6 +722,18 @@ def main():
             target_ratio = min(30 / v["duration_sec"], 1.0)
             closest = min(curve, key=lambda r: abs(r[0] - target_ratio))
             v["_retention_30s"] = closest[1] * 100
+
+    # Bulk fetch CTR / impressions (no se puede filtrar por video=X individualmente).
+    # Pedimos por dimensión video, ventana = primer published_at hasta hoy.
+    if videos:
+        earliest_pub = min(v["published_at"] for v in videos).strftime("%Y-%m-%d")
+        ctr_map = fetch_impressions_bulk(analytics, channel_id, earliest_pub, end_str)
+        print(f"Bulk impressions/CTR fetched para {len(ctr_map)} videos del canal")
+        for v in videos:
+            data = ctr_map.get(v["video_id"], {})
+            if data:
+                v["impressions"] = data["impressions"]
+                v["impressionsClickThroughRate"] = data["impressionsClickThroughRate"]
 
     # Baseline desde CSV
     df_all = pd.read_csv("videos_categorized.csv")

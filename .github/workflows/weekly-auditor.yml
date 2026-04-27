@@ -5,6 +5,17 @@ on:
     # 14:00 UTC Lunes = 10:00 Chile (verano UTC-4) → audita la semana Lun-Dom anterior
     - cron: '0 14 * * 1'
   workflow_dispatch:
+    inputs:
+      start_date:
+        description: 'Fecha inicio custom (YYYY-MM-DD). Vacío = semana anterior automática.'
+        required: false
+        default: ''
+        type: string
+      end_date:
+        description: 'Fecha fin custom (YYYY-MM-DD). Vacío = semana anterior automática.'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -41,6 +52,8 @@ jobs:
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
+          CUSTOM_START_DATE: ${{ github.event.inputs.start_date }}
+          CUSTOM_END_DATE: ${{ github.event.inputs.end_date }}
         run: python weekly_auditor.py
 
       - name: Rebuild dashboard
