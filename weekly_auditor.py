@@ -255,8 +255,15 @@ def fetch_impressions_bulk(analytics, channel_id, start_date, end_date, max_resu
                 "impressionsClickThroughRate": float(row[2] or 0),
             }
     except HttpError as e:
-        print(f"  [warn] bulk impressions fetch: {e.resp.status} "
-              f"{(e.content or b'')[:200]}")
+        # Nota: la métrica `impressions` NO está disponible en YouTube Analytics API v2
+        # interactiva. Solo existe en YouTube Reporting API (bulk CSV daily reports).
+        # Esto requiere integración separada. Por ahora, CTR queda como N/D.
+        msg = (e.content or b'').decode(errors="replace")
+        if "Unknown identifier (impressions)" in msg:
+            print("  [info] CTR no disponible via Analytics API "
+                  "(requiere YouTube Reporting API — feature pendiente)")
+        else:
+            print(f"  [warn] bulk impressions fetch: {e.resp.status} {msg[:200]}")
     return out
 
 
