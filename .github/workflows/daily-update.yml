@@ -46,11 +46,14 @@ jobs:
       - name: Rebuild dashboard
         run: python rebuild_dashboard.py
 
+      - name: Rebuild metrics report
+        run: python build_metrics.py
+
       - name: Commit and push changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           rm -f token.pickle
-          git add strategic_data.json strategic_dashboard.html videos_raw_data.csv videos_categorized.csv
+          git add strategic_data.json strategic_dashboard.html metrics.html audit_report.html videos_raw_data.csv videos_categorized.csv
           git diff --staged --quiet || git commit -m "Auto: Daily data refresh $(date +%Y-%m-%d)"
           git push
