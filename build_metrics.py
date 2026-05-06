@@ -121,10 +121,13 @@ df["_browse_views"] = df["_traffic"].apply(lambda t: sum_keys(t, BROWSE_KEYS))
 df["_suggested_views"] = df["_traffic"].apply(lambda t: sum_keys(t, SUGGESTED_KEYS))
 df["_search_views"] = df["_traffic"].apply(lambda t: sum_keys(t, SEARCH_KEYS))
 
+# Filter ALL aggregates to 2025+ (per dashboard simplification 2026-05)
+df = df[df["year"] >= 2025].copy()
+
 YEARS_ALL = sorted(df["year"].unique().tolist())
 TODAY = datetime.now(timezone.utc).date()
 CURRENT_YEAR = TODAY.year
-RECENT_YEARS = [y for y in [2024, 2025, 2026] if y in YEARS_ALL]
+RECENT_YEARS = [y for y in [2025, 2026] if y in YEARS_ALL]
 
 # ---------------------------------------------------------------------------
 # 2. efficiency (per recent year)
@@ -160,7 +163,7 @@ for y in RECENT_YEARS:
 # 3. health (per year-month from Jan 2024 forward)
 # ---------------------------------------------------------------------------
 health: list[dict] = []
-hm = df[df["year"] >= 2024].groupby(["year", "month"])
+hm = df[df["year"] >= 2025].groupby(["year", "month"])
 for (y, m), sub in hm:
     n = len(sub)
     if n < 1:
@@ -437,7 +440,7 @@ interpretations = {
     "best_conversion_year": best_conversion_year,
     "current_conversion": current_conversion,
     "best_sub_genre": best_sub_genre,
-    f"consistency_2024": consistency_lookup.get(2024),
+    f"consistency_2025": consistency_lookup.get(2025),
     f"consistency_{CURRENT_YEAR}": consistency_lookup.get(CURRENT_YEAR),
     "seasonal_peaks": seasonal_peaks,
 }
@@ -540,15 +543,15 @@ subconv_lis = "".join(
 
 # Consistency section
 cons_current = consistency_lookup.get(CURRENT_YEAR)
-cons_2024 = consistency_lookup.get(2024)
+cons_2025 = consistency_lookup.get(2025)
 if cons_current:
     p = cons_current["pct"]
     cons_class = "g" if p >= 80 else ("y" if p >= 50 else "r")
     cons_section_class = {"g": "green", "y": "yellow", "r": "red"}[cons_class]
     cons_dato = f'<div class="dato {cons_class}">{p:.0f}% en {CURRENT_YEAR}</div>'
     parts = []
-    if cons_2024:
-        parts.append(f'2024: {cons_2024["weeks_without"]} semanas sin publicar.')
+    if cons_2025 and CURRENT_YEAR != 2025:
+        parts.append(f'2025: {cons_2025["weeks_without"]} semanas sin publicar.')
     parts.append(
         f'{CURRENT_YEAR}: {cons_current["weeks_with"]}/{cons_current["total_weeks"]} semanas.'
     )
@@ -610,7 +613,7 @@ seasonal_lis = "".join(
 # ---------------------------------------------------------------------------
 # Assemble full HTML
 # ---------------------------------------------------------------------------
-header_period = f"Datos auditados &middot; Per&iacute;odo: Enero 2024 - {period_label}"
+header_period = f"Datos auditados &middot; Per&iacute;odo: Enero 2025 - {period_label}"
 
 html = (
     '<!DOCTYPE html><html lang="es"><head>'
@@ -771,7 +774,7 @@ with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
     f.write(html)
 
 size = os.path.getsize(OUTPUT_HTML)
-period_str = f"Ene 2024 - {period_label}"
+period_str = f"Ene 2025 - {period_label}"
 hc_str = (
     f"{health_current['label']} score={health_current['score']}"
     if health_current else "n/a"

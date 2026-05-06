@@ -273,7 +273,7 @@ def main():
     print(f"\n  CSV corregido guardado: {OUTPUT_CSV}")
 
     # Generar reporte HTML
-    print("\n[4/4] Generando reporte de auditoría...")
+    print("\n[4/5] Generando reporte de auditoría...")
     generate_audit_report(df, audit_results, keyword_results, corrections)
 
     # Actualizar strategic_data.json con keywords corregidas
@@ -321,6 +321,126 @@ def main():
         avg_engagement=('engagement_rate', 'mean'),
     ).reset_index().nlargest(15, 'total_views')
     sdata['top_games'] = tg.round(1).to_dict('records')
+
+    # ============================================================
+    # PASO 5: Year-filtered aggregates (recent: 2025-2026, ret: 2024-2026)
+    # ============================================================
+    print("\n[5/5] Calculando agregados filtrados por año (2025-2026 / 2024-2026)...")
+
+    # Underlying schema (English day names, UTC hours) is preserved so the
+    # existing dashboard JS — which converts UTC->Chile via _u2cD — keeps working.
+    df['_dt'] = pd.to_datetime(df['published_at'], utc=True, errors='coerce')
+    df['year'] = df['_dt'].dt.year
+    df['hour_utc'] = df['_dt'].dt.hour
+    df['dow_en'] = df['_dt'].dt.day_name()  # 'Monday', 'Tuesday', ...
+
+    days_en = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+    recent = df[df['year'] >= 2025].copy()
+    ret_window = df[df['year'] >= 2024].copy()
+    print(f"  recent (2025-2026): {len(recent)} videos | ret_window (2024-2026): {len(ret_window)} videos")
+
+    # --- timing_day_recent: avg views per day-of-week (2025-2026)
+    timing_day_recent = []
+    for d in days_en:
+        sub = recent[recent['dow_en'] == d]
+        timing_day_recent.append({
+            'day_of_week': d,
+            'avg_views': round(sub['views'].mean(), 0) if len(sub) else 0,
+            'num_videos': int(len(sub)),
+        })
+    sdata['timing_day_recent'] = timing_day_recent
+
+    # --- timing_hour_recent: avg views per UTC hour (2025-2026)
+    timing_hour_recent = []
+    rec_h = recent.dropna(subset=['hour_utc'])
+    hours_present = sorted(rec_h['hour_utc'].astype(int).unique().tolist()) if len(rec_h) else []
+    for h in hours_present:
+        sub = rec_h[rec_h['hour_utc'].astype(int) == h]
+        timing_hour_recent.append({
+            'hour': int(h),
+            'avg_views': round(sub['views'].mean(), 0) if len(sub) else 0,
+            'num_videos': int(len(sub)),
+        })
+    sdata['timing_hour_recent'] = timing_hour_recent
+
+    # --- timing_combo_recent: top 10 day_hour combos (2025-2026, min 2 vids)
+    rec_dh = recent.dropna(subset=['hour_utc']).copy()
+    rec_dh['hour_utc'] = rec_dh['hour_utc'].astype(int)
+    if len(rec_dh):
+        combo = rec_dh.groupby(['dow_en', 'hour_utc']).agg(
+            avg_views=('views', 'mean'),
+            num_videos=('video_id', 'count'),
+        ).reset_index()
+        combo = combo[combo['num_videos'] >= 2]
+        combo['day_hour'] = combo.apply(
+            lambda r: f"{r['dow_en']} {int(r['hour_utc']):02d}:00", axis=1
+        )
+        combo = combo.nlargest(10, 'avg_views')
+        combo['avg_views'] = combo['avg_views'].round(0)
+        sdata['timing_combo_recent'] = combo[['day_hour', 'avg_views', 'num_videos']].to_dict('records')
+    else:
+        sdata['timing_combo_recent'] = []
+
+    # --- timing_heatmap_recent: full day×hour grid (2025-2026)
+    if len(rec_dh):
+        heat = rec_dh.groupby(['dow_en', 'hour_utc']).agg(
+            avg_views=('views', 'mean'),
+            num_videos=('video_id', 'count'),
+        ).reset_index()
+        heat['day_hour'] = heat.apply(
+            lambda r: f"{r['dow_en']} {int(r['hour_utc']):02d}:00", axis=1
+        )
+        heat['avg_views'] = heat['avg_views'].round(0)
+        sdata['timing_heatmap_recent'] = heat[['day_hour', 'avg_views', 'num_videos']].to_dict('records')
+    else:
+        sdata['timing_heatmap_recent'] = []
+
+    # --- keywords_recent: same lift logic as keywords, but on 2025-2026 only.
+    # Reuses recalculate_keyword_lifts() so schema matches exactly.
+    if len(recent) >= 5:
+        kw_recent = recalculate_keyword_lifts(recent)
+        sdata['keywords_recent'] = [k for k in kw_recent if k['verified']]
+    else:
+        sdata['keywords_recent'] = []
+    print(f"  keywords_recent: {len(sdata['keywords_recent'])} (vs {len(sdata['keywords'])} all-time)")
+
+    # --- retention_avg_recent: 2024-2026 only (videos with retention_30s > 0)
+    ret = ret_window[ret_window['retention_30s'] > 0]
+    if len(ret):
+        sdata['retention_avg_recent'] = {
+            'retention_30s': round(ret['retention_30s'].mean(), 1),
+            'retention_1min': round(ret['retention_1min'].mean(), 1),
+            'retention_50pct': round(ret['retention_50pct'].mean(), 1),
+            'retention_70pct': round(ret['retention_70pct'].mean(), 1),
+            'num_videos': int(len(ret)),
+        }
+    else:
+        sdata['retention_avg_recent'] = {
+            'retention_30s': 0, 'retention_1min': 0, 'retention_50pct': 0,
+            'retention_70pct': 0, 'num_videos': 0,
+        }
+
+    # --- retention_by_genre_recent: 2024-2026, by genre (min 3 vids)
+    rg_rows = []
+    for g, grp in ret.groupby('game_genre'):
+        if len(grp) < 3:
+            continue
+        rg_rows.append({
+            'genre': g,
+            'num_videos': len(grp),
+            'retention_30s': round(grp['retention_30s'].mean(), 1),
+            'retention_1min': round(grp['retention_1min'].mean(), 1),
+            'retention_50pct': round(grp['retention_50pct'].mean(), 1),
+            'avg_views': round(grp['views'].mean(), 0),
+        })
+    sdata['retention_by_genre_recent'] = sorted(rg_rows, key=lambda x: x['retention_30s'], reverse=True)
+
+    # Limpieza: borrar columnas auxiliares antes de cualquier dump posterior del df
+    df.drop(columns=['_dt', 'year', 'hour_utc', 'dow_en'], inplace=True, errors='ignore')
+
+    print(f"  Aggregates _recent agregados: timing_day, timing_hour, timing_combo,")
+    print(f"    timing_heatmap, keywords, retention_avg, retention_by_genre")
 
     with open('strategic_data.json', 'w') as f:
         json.dump(sdata, f, ensure_ascii=False)
