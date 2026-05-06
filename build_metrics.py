@@ -26,6 +26,7 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INPUT_CSV = os.path.join(BASE_DIR, "videos_categorized.csv")
+STRATEGIC_JSON = os.path.join(BASE_DIR, "strategic_data.json")
 TEMPLATE_HTML = os.path.join(BASE_DIR, "metrics.html")
 OUTPUT_HTML = os.path.join(BASE_DIR, "metrics.html")
 
@@ -104,9 +105,22 @@ df["published_at"] = pd.to_datetime(df["published_at"], utc=True, errors="coerce
 df = df.dropna(subset=["published_at"]).copy()
 df["year"] = df["published_at"].dt.year.astype(int)
 df["month"] = df["published_at"].dt.month.astype(int)
+df["quarter"] = ((df["month"] - 1) // 3 + 1).astype(int)
+df["yq"] = df["year"].astype(str) + "Q" + df["quarter"].astype(str)
 iso = df["published_at"].dt.isocalendar()
 df["iso_year"] = iso["year"].astype(int)
 df["iso_week"] = iso["week"].astype(int)
+
+# Load projection metadata from strategic_data.json (computed by recompute_aggregates.py)
+try:
+    with open(STRATEGIC_JSON, "r", encoding="utf-8") as _f:
+        _strategic = json.load(_f)
+    _quarterly_meta = {
+        f"{q['year']}Q{q['quarter']}": q
+        for q in _strategic.get("quarterly", [])
+    }
+except (FileNotFoundError, ValueError):
+    _quarterly_meta = {}
 
 # Numeric coercions
 for col in ["views", "subscribers_gained", "estimated_minutes_watched",
@@ -123,11 +137,34 @@ df["_search_views"] = df["_traffic"].apply(lambda t: sum_keys(t, SEARCH_KEYS))
 
 # Filter ALL aggregates to 2025+ (per dashboard simplification 2026-05)
 df = df[df["year"] >= 2025].copy()
+df["quarter"] = df["published_at"].dt.quarter
 
 YEARS_ALL = sorted(df["year"].unique().tolist())
 TODAY = datetime.now(timezone.utc).date()
 CURRENT_YEAR = TODAY.year
+CURRENT_QUARTER = (TODAY.month - 1) // 3 + 1
 RECENT_YEARS = [y for y in [2025, 2026] if y in YEARS_ALL]
+
+
+def _quarter_dates(y: int, q: int):
+    from datetime import date, timedelta
+    m_start = (q - 1) * 3 + 1
+    start = date(y, m_start, 1)
+    if m_start + 3 > 12:
+        end = date(y, 12, 31)
+    else:
+        end = date(y, m_start + 3, 1) - timedelta(days=1)
+    return start, end
+
+
+def _quarter_projection(y: int, q: int):
+    """Return (days_elapsed, days_total, factor, is_current) for a quarter."""
+    start, end = _quarter_dates(y, q)
+    total = (end - start).days + 1
+    if y == CURRENT_YEAR and q == CURRENT_QUARTER:
+        elapsed = max(1, (TODAY - start).days + 1)
+        return elapsed, total, total / elapsed, True
+    return total, total, 1.0, False
 
 # ---------------------------------------------------------------------------
 # 2. efficiency (per recent year)
@@ -158,6 +195,45 @@ for y in RECENT_YEARS:
     }
     efficiency.append(entry)
     prev_eff = entry
+
+# ---------------------------------------------------------------------------
+# 2b. quarterly efficiency (per (year, quarter), 2025+, with current-quarter projection)
+# ---------------------------------------------------------------------------
+quarterly_efficiency: list[dict] = []
+prev_q_eff: dict | None = None
+quarter_keys = sorted(df.dropna(subset=["quarter"]).groupby(["year", "quarter"]).groups.keys())
+for (y, q) in quarter_keys:
+    sub = df[(df["year"] == y) & (df["quarter"] == q)]
+    n = len(sub)
+    if n == 0:
+        continue
+    views_total = sub["views"].sum()
+    subs_total = sub["subscribers_gained"].sum()
+    vpv = round(sub["views"].mean(), 0) if n else 0
+    spk = round((subs_total / views_total * 1000), 2) if views_total else 0
+    eng = round(sub["engagement_rate"].mean(), 2) if n else 0
+    elapsed, total, factor, is_current = _quarter_projection(int(y), int(q))
+    entry = {
+        "year": int(y),
+        "quarter": int(q),
+        "label": f"{int(y)}Q{int(q)}",
+        "num_videos": int(n),
+        "num_videos_projected": int(round(n * factor)),
+        "total_views": int(views_total),
+        "total_views_projected": int(round(views_total * factor)),
+        "views_per_video": float(vpv),
+        "subs_per_1k": float(spk),
+        "engagement": float(eng),
+        "vpv_trend": trend(vpv, prev_q_eff["views_per_video"] if prev_q_eff else None),
+        "spk_trend": trend(spk, prev_q_eff["subs_per_1k"] if prev_q_eff else None),
+        "eng_trend": trend(eng, prev_q_eff["engagement"] if prev_q_eff else None),
+        "projected": is_current,
+        "projected_factor": round(factor, 2),
+        "days_elapsed": elapsed,
+        "days_total": total,
+    }
+    quarterly_efficiency.append(entry)
+    prev_q_eff = entry
 
 # ---------------------------------------------------------------------------
 # 3. health (per year-month from Jan 2024 forward)
@@ -492,13 +568,23 @@ else:
     health_ctx = '<div class="context">Sin datos.</div>'
     health_section_class = "yellow"
 
-# Yearly conversion table rows (full history)
+# Quarterly conversion table rows (2025+, current quarter flagged as projected)
 yearly_rows = []
-for r in yearly_full:
+for r in quarterly_efficiency:
+    label = r["label"]
+    cls = ' style="font-style:italic;border-left:3px dashed var(--a4)"' if r["projected"] else ''
+    label_html = (
+        f'<b>{label}</b> <span style="color:var(--a4);font-size:10px">(PROY &times;{r["projected_factor"]:.2f})</span>'
+        if r["projected"] else f'<b>{label}</b>'
+    )
+    n_html = (
+        f'{r["num_videos"]} <span style="color:var(--a4);font-size:10px">&rarr;{r["num_videos_projected"]}</span>'
+        if r["projected"] else f'{r["num_videos"]}'
+    )
     yearly_rows.append(
-        "<tr>"
-        f"<td><b>{r['year']}</b></td>"
-        f"<td>{r['num_videos']}</td>"
+        f"<tr{cls}>"
+        f"<td>{label_html}</td>"
+        f"<td>{n_html}</td>"
         f"<td>{int(r['views_per_video']):,}</td>"
         f"{trend_td(r['vpv_trend'])}"
         f"<td>{r['subs_per_1k']:.2f}</td>"
@@ -508,6 +594,7 @@ for r in yearly_full:
         "</tr>"
     )
 yearly_table_body = "".join(yearly_rows)
+projected_q = next((r for r in quarterly_efficiency if r["projected"]), None)
 
 # Conversion title (best conversion year)
 if best_conversion_year and current_conversion:
@@ -613,7 +700,14 @@ seasonal_lis = "".join(
 # ---------------------------------------------------------------------------
 # Assemble full HTML
 # ---------------------------------------------------------------------------
-header_period = f"Datos auditados &middot; Per&iacute;odo: Enero 2025 - {period_label}"
+if projected_q:
+    header_period = (
+        f"Datos auditados &middot; Per&iacute;odo: 2025Q1 - {projected_q['label']} "
+        f"<span style=\"color:var(--a4)\">(en curso, proyectado &times;{projected_q['projected_factor']:.2f} | "
+        f"{projected_q['days_elapsed']}/{projected_q['days_total']} d&iacute;as)</span>"
+    )
+else:
+    header_period = f"Datos auditados &middot; Per&iacute;odo: Enero 2025 - {period_label}"
 
 html = (
     '<!DOCTYPE html><html lang="es"><head>'
@@ -683,7 +777,7 @@ html = (
     f'{conv_dato}'
     f'{conv_ctx}'
     '<table><thead><tr>'
-    '<th>Ano</th><th>Videos</th><th>Views/Vid</th><th></th>'
+    '<th>Quarter</th><th>Videos</th><th>Views/Vid</th><th></th>'
     '<th>Subs/1K</th><th></th><th>Eng%</th><th></th>'
     '</tr></thead><tbody>'
     f'{yearly_table_body}'
@@ -728,7 +822,7 @@ html = (
     '<div class="section yellow">'
     f'{traffic_dato}'
     '<table><thead><tr>'
-    '<th>Ano</th><th>Browse %</th><th>Vol</th>'
+    '<th>A&ntilde;o</th><th>Browse %</th><th>Vol</th>'
     '<th>Suggested %</th><th>Vol</th>'
     '<th>Search %</th><th>Vol</th>'
     '</tr></thead><tbody>'

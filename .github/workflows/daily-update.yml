@@ -43,6 +43,9 @@ jobs:
       - name: Audit and clean data
         run: python audit_validator.py
 
+      - name: Recompute analytical aggregates
+        run: python recompute_aggregates.py
+
       - name: Rebuild dashboard
         run: python rebuild_dashboard.py
 
