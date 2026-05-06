@@ -65,6 +65,18 @@ def load_data() -> pd.DataFrame:
     ):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Filtro defensivo: excluir Shorts (<=60s) y videos con #Shorts en el título.
+    # data_collector.py ya filtra al ingest, pero por si el CSV tiene rezagos
+    # de runs anteriores con el filtro viejo (<60), aplicamos el filtro aquí.
+    before = len(df)
+    if "duration_seconds" in df.columns:
+        df = df[df["duration_seconds"] > 60].copy()
+    if "title" in df.columns:
+        df = df[~df["title"].astype(str).str.contains(r"#[Ss]horts", regex=True, na=False)].copy()
+    excluded = before - len(df)
+    if excluded:
+        print(f"  Excluded {excluded} Shorts videos from analytics")
     return df
 
 

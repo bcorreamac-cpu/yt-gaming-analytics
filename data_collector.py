@@ -188,16 +188,20 @@ def get_video_details(youtube, video_ids):
             title = snippet.get("title", "")
             duration_sec = parse_duration(content.get("duration", "PT0S"))
 
-            # Filtrar Shorts: duración < 60s o título con #Shorts/#shorts
-            if duration_sec < 60:
+            # Filtrar Shorts: duración <=60s o título con #Shorts/#shorts
+            if duration_sec <= 60:
                 continue
             if re.search(r"#[Ss]horts", title):
                 continue
 
-            # Filtrar videos no públicos: privados, unlisted, deleted, fallidos
+            # Filtrar videos no públicos: privados, unlisted, ocultados, deleted, fallidos
+            # privacyStatus debe ser exactamente "public" (excluye unlisted y private)
             if status.get("privacyStatus") != "public":
                 continue
             if status.get("uploadStatus") != "processed":
+                continue
+            # madeForKids no debería aplicar a este canal pero lo registramos por seguridad
+            if status.get("publishStatus") and status.get("publishStatus") != "succeeded":
                 continue
 
             thumbnails = snippet.get("thumbnails", {})
@@ -484,17 +488,30 @@ def enrich_with_retention(analytics, channel_id, videos):
         except Exception as e:
             print(f"  [warn] no pude leer cache de retención: {e}")
 
-    print(f"\nObteniendo curvas de retención para TODOS los videos ({len(videos)})...")
+    eligible_videos = [v for v in videos if (v.get("published_at") or "")[:4] >= "2022"]
+    print(f"\nObteniendo curvas de retención para videos publicados desde 2022 ({len(eligible_videos)} de {len(videos)})...")
     print(f"  Cache previo: {len(cache)} videos con retención ya capturada")
 
     end_date = datetime.now().strftime("%Y-%m-%d")
     today = datetime.now().date()
     fetched = 0
     cached_used = 0
+    skipped_pre2022 = 0
 
     for video in tqdm(videos, desc="Retención de audiencia"):
         vid = video["video_id"]
         pub_str = (video.get("published_at") or "2000-01-01")[:10]
+
+        # Excluir videos pre-2022 de la pulled retention (por solicitud del usuario)
+        if pub_str[:4] < "2022":
+            video["retention_30s"] = None
+            video["retention_1min"] = None
+            video["retention_50pct"] = None
+            video["retention_70pct"] = None
+            video["retention_curve"] = ""
+            skipped_pre2022 += 1
+            continue
+
         try:
             pub_date_dt = datetime.strptime(pub_str, "%Y-%m-%d").date()
             days_old = (today - pub_date_dt).days
@@ -522,7 +539,7 @@ def enrich_with_retention(analytics, channel_id, videos):
         video["retention_curve"] = json.dumps(curve) if curve else ""
         fetched += 1
 
-    print(f"  Resultado: {fetched} re-fetched | {cached_used} desde cache")
+    print(f"  Resultado: {fetched} re-fetched | {cached_used} desde cache | {skipped_pre2022} skipped (pre-2022)")
     return videos
 
 
