@@ -369,10 +369,7 @@ def compute_quarterly(df: pd.DataFrame) -> list:
         ret = grp[grp["retention_30s"] > 0]
         ret_avg = float(ret["retention_30s"].mean()) if len(ret) else None
         retention_is_proxy = bool(len(ret) < max(3, len(grp) // 3))
-        if ret_avg is None:
-            # historical fallback used a global default ~50; mark as proxy
-            ret_avg = 50.0
-            retention_is_proxy = True
+        # Leave ret_avg=None when no data — chart will show a gap rather than a misleading flat 50%
 
         top = grp.nlargest(1, "views")
         top_title = str(top.iloc[0].get("title") or "")[:80] if len(top) else ""
@@ -391,7 +388,7 @@ def compute_quarterly(df: pd.DataFrame) -> list:
             "avg_engagement": _safe_round(grp["engagement_rate"].mean(), 3),
             "avg_avd": _safe_round(grp.loc[grp["avg_view_duration_sec"] > 0, "avg_view_duration_sec"].mean(), 1),
             "avg_avd_sec": _safe_round(grp.loc[grp["avg_view_duration_sec"] > 0, "avg_view_duration_sec"].mean(), 1),
-            "avg_retention_30s": _safe_round(ret_avg, 1),
+            "avg_retention_30s": (round(float(ret_avg), 1) if ret_avg is not None else None),
             "retention_is_proxy": retention_is_proxy,
             "top_video_title": top_title,
             "top_video_views": top_views,
@@ -755,13 +752,33 @@ def compute_channel_activity_quarterly(df: pd.DataFrame) -> list:
     for (y, q), grp in df.groupby(["year", "quarter"]):
         if y < 2021:
             continue
+        start, end = quarter_dates(int(y), int(q))
+        total = (end - start).days + 1
+        if is_current_quarter(int(y), int(q), TODAY):
+            elapsed = max(1, (TODAY - start).days + 1)
+            factor = total / elapsed
+            is_current = True
+        else:
+            elapsed = total
+            factor = 1.0
+            is_current = False
+        views = _safe_int(grp["views"].sum())
+        minutes = _safe_int(grp["estimated_minutes_watched"].sum())
+        subs = _safe_int(grp["subscribers_gained"].sum())
         rows.append({
             "year": int(y),
             "quarter": int(q),
             "label": f"Q{int(q)} {int(y)}",
-            "views": _safe_int(grp["views"].sum()),
-            "minutes": _safe_int(grp["estimated_minutes_watched"].sum()),
-            "subs_gained": _safe_int(grp["subscribers_gained"].sum()),
+            "views": views,
+            "minutes": minutes,
+            "subs_gained": subs,
+            "views_projected": int(round(views * factor)),
+            "minutes_projected": int(round(minutes * factor)),
+            "subs_gained_projected": int(round(subs * factor)),
+            "projected": is_current,
+            "projected_factor": round(factor, 2),
+            "days_elapsed": elapsed,
+            "days_total": total,
         })
     return sorted(rows, key=lambda r: (r["year"], r["quarter"]))
 
