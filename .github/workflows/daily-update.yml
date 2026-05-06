@@ -2,9 +2,9 @@ name: Daily Dashboard Update
 
 on:
   schedule:
-    # 04:00 UTC = 00:00 Chile (medianoche)
-    # Todos los días
-    - cron: '0 4 * * *'
+    # 04:00 UTC = 00:00 Chile (medianoche) y 16:00 UTC = 12:00 Chile (mediodía)
+    # Dos veces al día
+    - cron: '0 4,16 * * *'
   workflow_dispatch:  # permite ejecutar manualmente
 
 permissions:
