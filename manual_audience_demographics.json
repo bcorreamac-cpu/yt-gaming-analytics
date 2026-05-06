@@ -1,0 +1,28 @@
+{
+  "_meta": {
+    "source": "YouTube Studio → Analytics → Audience → Edad y sexo (visualizaciones)",
+    "period": "Últimos 28 días",
+    "last_updated": "2026-05-06",
+    "geography_note": "Audiencia principal FUERA de LATAM",
+    "instructions": "Para actualizar: abrir YouTube Studio → Analytics → Audience tab → Edad y sexo. Editar este archivo con los porcentajes."
+  },
+  "gender": {
+    "male_pct": 77.5,
+    "female_pct": 22.5,
+    "user_specified_pct": 0.0
+  },
+  "age": {
+    "13-17": 7.2,
+    "18-24": 14.6,
+    "25-34": 37.7,
+    "35-44": 25.8,
+    "45-54": 10.0,
+    "55-64": 3.0,
+    "65+": 1.7
+  },
+  "_derived": {
+    "primary_segment": "Hombres 25-44 años",
+    "primary_segment_pct": 63.5,
+    "comment": "Núcleo: hombres millennials/Gen X tardío. Menos del 22% son menores de 25 — el contenido NO debe asumir Gen Z."
+  }
+}

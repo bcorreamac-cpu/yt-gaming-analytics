@@ -29,6 +29,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent
 CSV = ROOT / "videos_categorized.csv"
 JSON_PATH = ROOT / "strategic_data.json"
+MANUAL_HEATMAP_PATH = ROOT / "manual_audience_heatmap.json"
+MANUAL_DEMOGRAPHICS_PATH = ROOT / "manual_audience_demographics.json"
 TODAY = date.today()
 CURRENT_YEAR = TODAY.year
 
@@ -854,6 +856,167 @@ def update_channel_activity(df: pd.DataFrame, existing: dict | None) -> dict:
 
 
 # --------------------------------------------------------------------------
+# Audience heatmap (manual YouTube Studio data)
+# --------------------------------------------------------------------------
+
+DAYS_ORDER = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+DAY_ES = {"Mon": "Lun", "Tue": "Mar", "Wed": "Mié", "Thu": "Jue",
+          "Fri": "Vie", "Sat": "Sáb", "Sun": "Dom"}
+HOUR_BUCKETS = [0, 3, 6, 9, 12, 15, 18, 21]
+LEAD_TIME_HOURS = 3  # YouTube needs ~3hr to index a new upload before recommendations kick in
+
+
+def _interp_intensity(intensity_by_day: dict, day: str, hour: int) -> float:
+    """Linear interpolation between adjacent 3-hour buckets for a given day,
+    wrapping around midnight (e.g., hour 22 interpolates between 21 and 0+24).
+    """
+    day_data = intensity_by_day.get(day, {})
+    # Convert string keys to ints for lookups
+    int_data = {int(k): float(v) for k, v in day_data.items()}
+    if hour in int_data:
+        return float(int_data[hour])
+    # Find bracket
+    lower = max((b for b in HOUR_BUCKETS if b <= hour), default=21)
+    upper = min((b for b in HOUR_BUCKETS if b > hour), default=None)
+    if upper is None:
+        # interpolate between 21 (today) and 0 (next day, treated as +24)
+        upper_val = int_data.get(0, 0)
+        lower_val = int_data.get(21, 0)
+        span = 24 - 21
+        frac = (hour - 21) / span
+        return lower_val + (upper_val - lower_val) * frac
+    span = upper - lower
+    frac = (hour - lower) / span if span else 0
+    return int_data.get(lower, 0) + (int_data.get(upper, 0) - int_data.get(lower, 0)) * frac
+
+
+def compute_audience_recommendations(df: pd.DataFrame, manual_path: Path) -> dict | None:
+    """Load the manual YouTube Studio heatmap and derive top-3 publish windows.
+
+    Returns dict with keys: audience_heatmap, publish_recommendations, manual_data_meta.
+    Returns None if manual file is missing or invalid (caller logs warning).
+    """
+    if not manual_path.exists():
+        print(f"  WARN: {manual_path.name} not found — skipping audience recommendations")
+        return None
+    try:
+        with open(manual_path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        meta = raw.get("_meta") or {}
+        intensity = raw.get("intensity") or {}
+        # Validate: 7 days × 8 buckets
+        for d in DAYS_ORDER:
+            if d not in intensity:
+                raise ValueError(f"missing day '{d}'")
+            for hb in HOUR_BUCKETS:
+                if str(hb) not in intensity[d]:
+                    raise ValueError(f"missing hour {hb} for day {d}")
+                v = intensity[d][str(hb)]
+                if not isinstance(v, (int, float)) or v < 0 or v > 100:
+                    raise ValueError(f"intensity out of range for {d} {hb}: {v}")
+    except Exception as exc:
+        print(f"  WARN: failed to parse {manual_path.name}: {exc} — skipping")
+        return None
+
+    # Build the grid (7 rows × 8 cols)
+    grid = [[int(intensity[d][str(h)]) for h in HOUR_BUCKETS] for d in DAYS_ORDER]
+    audience_heatmap = {
+        "_meta": meta,
+        "days": list(DAYS_ORDER),
+        "hours": list(HOUR_BUCKETS),
+        "grid": grid,
+    }
+
+    # Score each (day, publish_hour) pair: audience intensity at publish_hour + LEAD_TIME_HOURS
+    # Iterate every 24 hours for richer scoring; interpolate if hour not on grid.
+    scored = []
+    for di, day in enumerate(DAYS_ORDER):
+        for pub_h in range(24):
+            tgt_h = pub_h + LEAD_TIME_HOURS
+            tgt_day = day
+            if tgt_h >= 24:
+                tgt_h -= 24
+                tgt_day = DAYS_ORDER[(di + 1) % 7]
+            score = _interp_intensity(intensity, tgt_day, tgt_h)
+            scored.append({
+                "day": day,
+                "publish_hour": pub_h,
+                "audience_day": tgt_day,
+                "audience_hour": tgt_h,
+                "score": score,
+            })
+
+    # Pick top 3, but enforce (day, ~publish_hour bucket) diversity so we don't
+    # return three near-identical adjacent slots — group by day first.
+    scored.sort(key=lambda r: r["score"], reverse=True)
+    top = []
+    seen_days = set()
+    for s in scored:
+        # First pass: prefer one slot per day
+        if s["day"] in seen_days:
+            continue
+        top.append(s)
+        seen_days.add(s["day"])
+        if len(top) >= 3:
+            break
+    # If fewer than 3 (very small grid), backfill from sorted
+    if len(top) < 3:
+        for s in scored:
+            if s not in top:
+                top.append(s)
+                if len(top) >= 3:
+                    break
+
+    recs = []
+    for r in top:
+        score = float(r["score"])
+        if score >= 80:
+            conf = "alta"
+        elif score >= 60:
+            conf = "media"
+        else:
+            conf = "baja"
+        pub_h = r["publish_hour"]
+        aud_h = r["audience_hour"]
+        aud_day_es = DAY_ES.get(r["audience_day"], r["audience_day"])
+        same_day = r["audience_day"] == r["day"]
+        # Audience window = 3hr block starting at the audience hour
+        aud_end = (aud_h + 3) % 24
+        window_label = f"{aud_h:02d}:00-{aud_end:02d}:00 Chile"
+        if not same_day:
+            window_label = f"{aud_day_es} {window_label}"
+        reasoning = (
+            f"Publicar {DAY_ES[r['day']]} {pub_h:02d}:00 hace que el video aparezca en feeds "
+            f"alrededor de las {aud_h:02d}:00 (lead time +{LEAD_TIME_HOURS}hr de YouTube), "
+            f"justo cuando tu audiencia tiene intensidad {int(round(score))}/100 según YouTube Studio."
+        )
+        recs.append({
+            "day": r["day"],
+            "day_es": DAY_ES.get(r["day"], r["day"]),
+            "hour": f"{pub_h:02d}:00",
+            "publish_hour_int": pub_h,
+            "audience_window": window_label,
+            "audience_hour_int": aud_h,
+            "score": round(score, 1),
+            "confidence": conf,
+            "reasoning": reasoning,
+        })
+
+    manual_data_meta = {
+        "last_updated": meta.get("last_updated", "--"),
+        "source": meta.get("source", "YouTube Studio"),
+        "timezone": meta.get("timezone", "America/Santiago (GMT-4)"),
+        "period": meta.get("period", "Últimos 28 días"),
+    }
+
+    return {
+        "audience_heatmap": audience_heatmap,
+        "publish_recommendations": recs,
+        "manual_data_meta": manual_data_meta,
+    }
+
+
+# --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
 
@@ -886,6 +1049,28 @@ def main():
     d["channel_activity_quarterly"] = compute_channel_activity_quarterly(df)
     d["channel_activity_quarterly_3y"] = compute_channel_activity_quarterly_3y(df)
     d["channel_activity"] = update_channel_activity(df, d.get("channel_activity"))
+
+    # Audience heatmap (manual YouTube Studio data) → publish recommendations
+    aud = compute_audience_recommendations(df, MANUAL_HEATMAP_PATH)
+    if aud is not None:
+        d["audience_heatmap"] = aud["audience_heatmap"]
+        d["publish_recommendations"] = aud["publish_recommendations"]
+        d["manual_data_meta"] = aud["manual_data_meta"]
+        print(f"  audience_heatmap injected ({len(aud['audience_heatmap']['days'])}×{len(aud['audience_heatmap']['hours'])})")
+        print(f"  publish_recommendations: {len(aud['publish_recommendations'])} top windows")
+        for i, r in enumerate(aud["publish_recommendations"], 1):
+            print(f"    #{i} {r['day_es']} {r['hour']} → audiencia {r['audience_window']} (score {r['score']}, {r['confidence']})")
+
+    # Audience demographics (manual YouTube Studio data)
+    if MANUAL_DEMOGRAPHICS_PATH.exists():
+        try:
+            with open(MANUAL_DEMOGRAPHICS_PATH) as f:
+                demo = json.load(f)
+            d["audience_demographics"] = demo
+            primary = demo.get("_derived", {}).get("primary_segment", "n/a")
+            print(f"  audience_demographics injected (primary: {primary})")
+        except Exception as e:
+            print(f"  [warn] no pude leer demographics: {e}")
 
     # Write
     out_text = json.dumps(d, ensure_ascii=False)

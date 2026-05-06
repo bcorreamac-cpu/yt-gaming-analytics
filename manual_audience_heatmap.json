@@ -1,0 +1,18 @@
+{
+  "_meta": {
+    "source": "YouTube Studio → Audience → 'Horas de actividad de tus usuarios en YouTube'",
+    "timezone": "America/Santiago (GMT-4)",
+    "period": "Últimos 28 días",
+    "last_updated": "2026-05-06",
+    "instructions": "Para actualizar: abrir YouTube Studio → Analytics → Audience tab. Copiar la intensidad relativa (0-100, donde 100=cell más oscura). Editar este archivo. El próximo refresh del dashboard lo lee automáticamente."
+  },
+  "intensity": {
+    "Mon": {"0": 25, "3": 15, "6": 30, "9": 50, "12": 65, "15": 60, "18": 50, "21": 35},
+    "Tue": {"0": 25, "3": 15, "6": 30, "9": 50, "12": 65, "15": 60, "18": 55, "21": 35},
+    "Wed": {"0": 25, "3": 15, "6": 35, "9": 55, "12": 65, "15": 65, "18": 55, "21": 35},
+    "Thu": {"0": 25, "3": 15, "6": 35, "9": 60, "12": 80, "15": 75, "18": 60, "21": 40},
+    "Fri": {"0": 30, "3": 20, "6": 40, "9": 65, "12": 85, "15": 80, "18": 65, "21": 45},
+    "Sat": {"0": 35, "3": 25, "6": 50, "9": 75, "12": 90, "15": 90, "18": 70, "21": 50},
+    "Sun": {"0": 35, "3": 25, "6": 50, "9": 75, "12": 90, "15": 90, "18": 75, "21": 55}
+  }
+}
