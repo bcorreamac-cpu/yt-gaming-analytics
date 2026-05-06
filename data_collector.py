@@ -453,34 +453,76 @@ def calculate_retention_metrics(retention_curve, duration_seconds):
 
 
 def enrich_with_retention(analytics, channel_id, videos):
-    """Agrega datos de retención a los top N videos por views."""
-    sorted_videos = sorted(videos, key=lambda v: v.get("views", 0), reverse=True)
-    top_ids = {v["video_id"] for v in sorted_videos[:TOP_N_RETENTION]}
+    """Agrega datos de retención a TODOS los videos.
+
+    Estrategia incremental para no quemar cuota de la Analytics API:
+      - Si el video ya tiene retention_curve en el CSV anterior y se publicó
+        hace >90 días: reusa el cache (retención estable).
+      - Si el video se publicó en los últimos 90 días o nunca tuvo curva:
+        re-fetcha (retención reciente todavía evoluciona).
+    """
+    import os as _os
+
+    cache: dict = {}
+    csv_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "videos_raw_data.csv")
+    if _os.path.exists(csv_path):
+        try:
+            prev = pd.read_csv(csv_path)
+            for _, row in prev.iterrows():
+                vid = row.get("video_id")
+                if not vid or pd.isna(vid):
+                    continue
+                curve = row.get("retention_curve") or ""
+                if isinstance(curve, str) and curve:
+                    cache[vid] = {
+                        "retention_30s": None if pd.isna(row.get("retention_30s")) else row.get("retention_30s"),
+                        "retention_1min": None if pd.isna(row.get("retention_1min")) else row.get("retention_1min"),
+                        "retention_50pct": None if pd.isna(row.get("retention_50pct")) else row.get("retention_50pct"),
+                        "retention_70pct": None if pd.isna(row.get("retention_70pct")) else row.get("retention_70pct"),
+                        "retention_curve": curve,
+                    }
+        except Exception as e:
+            print(f"  [warn] no pude leer cache de retención: {e}")
+
+    print(f"\nObteniendo curvas de retención para TODOS los videos ({len(videos)})...")
+    print(f"  Cache previo: {len(cache)} videos con retención ya capturada")
 
     end_date = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now().date()
+    fetched = 0
+    cached_used = 0
 
-    print(f"\nObteniendo curvas de retención (top {TOP_N_RETENTION} videos)...")
     for video in tqdm(videos, desc="Retención de audiencia"):
-        if video["video_id"] not in top_ids:
-            video["retention_30s"] = None
-            video["retention_1min"] = None
-            video["retention_50pct"] = None
-            video["retention_70pct"] = None
-            video["retention_curve"] = ""
+        vid = video["video_id"]
+        pub_str = (video.get("published_at") or "2000-01-01")[:10]
+        try:
+            pub_date_dt = datetime.strptime(pub_str, "%Y-%m-%d").date()
+            days_old = (today - pub_date_dt).days
+        except Exception:
+            days_old = 9999
+
+        cached = cache.get(vid)
+        if cached and days_old > 90:
+            video["retention_30s"] = cached["retention_30s"]
+            video["retention_1min"] = cached["retention_1min"]
+            video["retention_50pct"] = cached["retention_50pct"]
+            video["retention_70pct"] = cached["retention_70pct"]
+            video["retention_curve"] = cached["retention_curve"]
+            cached_used += 1
             continue
 
-        pub_date = video.get("published_at", "2000-01-01")[:10]
         curve = get_retention_data(
-            analytics, channel_id, video["video_id"], pub_date, end_date
+            analytics, channel_id, vid, pub_str, end_date
         )
-
         metrics = calculate_retention_metrics(curve, video.get("duration_seconds", 0))
         video["retention_30s"] = metrics["retention_30s"]
         video["retention_1min"] = metrics["retention_1min"]
         video["retention_50pct"] = metrics["retention_50pct"]
         video["retention_70pct"] = metrics["retention_70pct"]
         video["retention_curve"] = json.dumps(curve) if curve else ""
+        fetched += 1
 
+    print(f"  Resultado: {fetched} re-fetched | {cached_used} desde cache")
     return videos
 
 

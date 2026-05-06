@@ -543,7 +543,7 @@ function renderQuart(){
   qCharts.v=new Chart(document.getElementById("c-q-views"),{type:"bar",data:{labels:labels,datasets:[{label:"Views Totales (proyectado para Q en curso)",data:viewsData,backgroundColor:viewsBg,borderColor:viewsBd,borderWidth:viewsBw,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:function(ctx){var x=fq[ctx.dataIndex];if(x.projected){return ["Proyectado: "+fmt(x.total_views_projected),"Actual ("+x.days_elapsed+"/"+x.days_total+"d): "+fmt(x.total_views)];}return "Views: "+fmt(x.total_views);}}}},scales:{x:{ticks:{color:"#8B949E",maxTicksLimit:15,font:{size:10}},grid:{color:"#1C2333"}},y:{ticks:{color:"#8B949E",callback:function(v){return fmt(v)}},grid:{color:"#1C2333"}}}}});
   if(qCharts.a)qCharts.a.destroy();
   // Rates (avg_avd, avg_retention_30s) are NOT projected — show as observed
-  qCharts.a=new Chart(document.getElementById("c-q-avd"),{type:"line",data:{labels:labels,datasets:[{label:"AVD (seg)",data:fq.map(function(x){return x.avg_avd}),borderColor:"#00B894",backgroundColor:"rgba(0,184,148,.1)",fill:true,tension:.3,pointRadius:4,borderWidth:2,spanGaps:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:"#8B949E",maxTicksLimit:15,font:{size:10}},grid:{color:"#1C2333"}},y:{ticks:{color:"#8B949E",callback:function(v){return v+"s"}},grid:{color:"#1C2333"}}}}});
+  qCharts.a=new Chart(document.getElementById("c-q-avd"),{type:"line",data:{labels:labels,datasets:[{label:"AVD (seg)",data:fq.map(function(x){return x.avg_avd}),borderColor:"#00B894",backgroundColor:"rgba(0,184,148,.1)",fill:true,tension:.3,pointRadius:4,borderWidth:2,spanGaps:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:"#8B949E",maxTicksLimit:15,font:{size:10}},grid:{color:"#1C2333"}},y:{beginAtZero:true,min:0,ticks:{color:"#8B949E",callback:function(v){return v+"s"}},grid:{color:"#1C2333"}}}}});
   if(qCharts.r)qCharts.r.destroy();
   qCharts.r=new Chart(document.getElementById("c-q-ret"),{type:"line",data:{labels:labels,datasets:[{label:"Retención 30s %",data:fq.map(function(x){return x.avg_retention_30s}),borderColor:"#6C5CE7",backgroundColor:"rgba(108,92,231,.1)",fill:true,tension:.3,pointRadius:4,borderWidth:2,spanGaps:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:"#8B949E",maxTicksLimit:15,font:{size:10}},grid:{color:"#1C2333"}},y:{min:40,max:75,ticks:{color:"#8B949E",callback:function(v){return v+"%"}},grid:{color:"#1C2333"}}}}});
   var tbl=document.getElementById("t-quart");
@@ -643,6 +643,7 @@ if(q3y.length){
     "<ol style='padding-left:18px;margin:6px 0'>"+(WA.recommendations||[]).map(function(r){return "<li style='margin:6px 0'>"+r+"</li>";}).join("")+"</ol>":
     "<p style='color:var(--tx2);font-style:italic'>Sin recomendaciones específicas.</p>";
 })();
+
 
 
 
