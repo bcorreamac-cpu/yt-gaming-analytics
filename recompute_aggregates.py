@@ -383,7 +383,10 @@ def compute_quarterly(df: pd.DataFrame) -> list:
         ret = grp[grp["retention_30s"] > 0]
         ret_avg = float(ret["retention_30s"].mean()) if len(ret) else None
         retention_is_proxy = bool(len(ret) < max(3, len(grp) // 3))
-        # Leave ret_avg=None when no data — chart will show a gap rather than a misleading flat 50%
+        # Retention 1min (60s)
+        ret1m_data = grp[grp["retention_1min"] > 0] if "retention_1min" in grp.columns else grp.iloc[0:0]
+        ret_1min_avg = float(ret1m_data["retention_1min"].mean()) if len(ret1m_data) else None
+        # Leave None when no data — chart will show a gap rather than a misleading flat 50%
 
         top = grp.nlargest(1, "views")
         top_title = str(top.iloc[0].get("title") or "")[:80] if len(top) else ""
@@ -403,6 +406,7 @@ def compute_quarterly(df: pd.DataFrame) -> list:
             "avg_avd": _safe_round(grp.loc[grp["avg_view_duration_sec"] > 0, "avg_view_duration_sec"].mean(), 1),
             "avg_avd_sec": _safe_round(grp.loc[grp["avg_view_duration_sec"] > 0, "avg_view_duration_sec"].mean(), 1),
             "avg_retention_30s": (round(float(ret_avg), 1) if ret_avg is not None else None),
+            "avg_retention_1min": (round(float(ret_1min_avg), 1) if ret_1min_avg is not None else None),
             "retention_is_proxy": retention_is_proxy,
             "top_video_title": top_title,
             "top_video_views": top_views,
