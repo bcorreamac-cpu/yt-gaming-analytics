@@ -1036,9 +1036,13 @@ def compute_recent_videos_retention(df: pd.DataFrame, weeks: int = 4) -> dict:
 
     videos = []
     for _, r in recent.iterrows():
+        first24 = r.get("first_24h_views") if "first_24h_views" in r.index else None
+        first24_val = (int(first24) if pd.notna(first24) and first24 is not None and first24 != "" else None)
+        vpm24 = round(first24_val / 1440.0, 2) if first24_val is not None and first24_val > 0 else None
         videos.append({
             "video_id": str(r.get("video_id") or ""),
             "title": str(r.get("title") or "")[:100],
+            "game_name": str(r.get("game_name") or "Otro / No Identificado"),
             "date": r["_pub"].strftime("%Y-%m-%d"),
             "views": _safe_int(r.get("views")),
             "duration_seconds": _safe_int(r.get("duration_seconds")),
@@ -1051,6 +1055,8 @@ def compute_recent_videos_retention(df: pd.DataFrame, weeks: int = 4) -> dict:
             "retention_1min": (round(float(r["retention_1min"]), 1)
                                if pd.notna(r.get("retention_1min")) and r.get("retention_1min", 0) > 0
                                else None),
+            "first_24h_views": first24_val,
+            "views_per_minute_24h": vpm24,
             "game_genre": str(r.get("game_genre") or ""),
         })
 

@@ -285,6 +285,71 @@ def get_analytics_metrics(analytics, channel_id, video_id, start_date, end_date)
     return result
 
 
+def get_first_24h_views(analytics, channel_id, video_id, published_at_str):
+    """Views acumuladas en las primeras 24 horas tras publicación.
+    Solo aplica si el video ya tiene >24h de edad."""
+    try:
+        pub_dt = datetime.strptime(published_at_str[:10], "%Y-%m-%d")
+        end_dt = pub_dt + timedelta(days=1)
+        if end_dt.date() > datetime.now().date():
+            return None  # todavía no cumple 24h
+        resp = api_call_with_backoff(
+            lambda: analytics.reports().query(
+                ids=f"channel=={channel_id}",
+                startDate=pub_dt.strftime("%Y-%m-%d"),
+                endDate=end_dt.strftime("%Y-%m-%d"),
+                metrics="views",
+                filters=f"video=={video_id}",
+            ).execute()
+        )
+        if resp.get("rows") and len(resp["rows"]) > 0:
+            return int(resp["rows"][0][0])
+    except Exception:
+        pass
+    return None
+
+
+def enrich_with_first_24h(analytics, channel_id, videos):
+    """Agrega first_24h_views a TODOS los videos con cache incremental.
+    Una vez capturado, es estático para siempre (no cambia)."""
+    import os as _os
+    cache = {}
+    csv_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "videos_raw_data.csv")
+    if _os.path.exists(csv_path):
+        try:
+            prev = pd.read_csv(csv_path)
+            if "first_24h_views" in prev.columns:
+                for _, row in prev.iterrows():
+                    vid = row.get("video_id")
+                    v = row.get("first_24h_views")
+                    if vid and not pd.isna(vid) and not pd.isna(v):
+                        cache[vid] = int(v)
+        except Exception as e:
+            print(f"  [warn] no pude leer cache de first_24h: {e}")
+
+    print(f"\nObteniendo views primeras 24h ({len(videos)} videos)...")
+    print(f"  Cache previo: {len(cache)} ya capturados")
+    fetched = 0
+    cached_used = 0
+    skipped_too_new = 0
+
+    for video in tqdm(videos, desc="Views primeras 24h"):
+        vid = video["video_id"]
+        if vid in cache:
+            video["first_24h_views"] = cache[vid]
+            cached_used += 1
+            continue
+        v = get_first_24h_views(analytics, channel_id, vid, video.get("published_at", ""))
+        if v is None:
+            video["first_24h_views"] = None
+            skipped_too_new += 1
+        else:
+            video["first_24h_views"] = v
+            fetched += 1
+    print(f"  Resultado: {fetched} nuevos | {cached_used} cache | {skipped_too_new} sin cumplir 24h")
+    return videos
+
+
 def enrich_with_analytics(analytics, channel_id, videos):
     """Enriquece los datos de videos con métricas de Analytics API."""
     end_date = datetime.now().strftime("%Y-%m-%d")
@@ -579,8 +644,11 @@ def main():
     # 6. Fuentes de tráfico
     videos = enrich_with_traffic_sources(analytics, channel_id, videos)
 
-    # 7. Curvas de retención (top 200)
+    # 7. Curvas de retención (todos los videos publicados desde 2022)
     videos = enrich_with_retention(analytics, channel_id, videos)
+
+    # 7b. Views primeras 24h (incremental, cache permanente)
+    videos = enrich_with_first_24h(analytics, channel_id, videos)
 
     # 8. Guardar CSV
     df = pd.DataFrame(videos)
@@ -592,6 +660,7 @@ def main():
         "subscribers_gained", "estimated_minutes_watched",
         "retention_30s", "retention_1min", "retention_50pct", "retention_70pct",
         "retention_curve", "traffic_sources",
+        "first_24h_views",
     ]
     existing_cols = [c for c in column_order if c in df.columns]
     df = df[existing_cols]
