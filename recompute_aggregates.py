@@ -1020,6 +1020,48 @@ def compute_audience_recommendations(df: pd.DataFrame, manual_path: Path) -> dic
     }
 
 
+def compute_recent_videos_retention(df: pd.DataFrame, weeks: int = 4) -> dict:
+    """Per-video AVD + retention metrics for the last N weeks of publications.
+
+    Always returns at least the most recent videos so the dashboard always
+    shows the latest content even if it falls outside the strict window.
+    Missing values stay as None — the UI renders 'no existe información'.
+    """
+    cutoff = TODAY - timedelta(days=weeks * 7)
+    recent = df[df["date"] >= cutoff].copy()
+    # Safety net: if 4-week window is empty, fall back to the last 5 published
+    if len(recent) == 0:
+        recent = df.sort_values("_pub", ascending=False).head(5).copy()
+    recent = recent.sort_values("_pub", ascending=False)
+
+    videos = []
+    for _, r in recent.iterrows():
+        videos.append({
+            "video_id": str(r.get("video_id") or ""),
+            "title": str(r.get("title") or "")[:100],
+            "date": r["_pub"].strftime("%Y-%m-%d"),
+            "views": _safe_int(r.get("views")),
+            "duration_seconds": _safe_int(r.get("duration_seconds")),
+            "avg_avd_sec": (round(float(r["avg_view_duration_sec"]), 1)
+                            if pd.notna(r.get("avg_view_duration_sec")) and r.get("avg_view_duration_sec", 0) > 0
+                            else None),
+            "retention_30s": (round(float(r["retention_30s"]), 1)
+                              if pd.notna(r.get("retention_30s")) and r.get("retention_30s", 0) > 0
+                              else None),
+            "retention_1min": (round(float(r["retention_1min"]), 1)
+                               if pd.notna(r.get("retention_1min")) and r.get("retention_1min", 0) > 0
+                               else None),
+            "game_genre": str(r.get("game_genre") or ""),
+        })
+
+    return {
+        "window_days": weeks * 7,
+        "cutoff_date": cutoff.isoformat(),
+        "today": TODAY.isoformat(),
+        "videos": videos,
+    }
+
+
 # --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
@@ -1042,6 +1084,7 @@ def main():
     d["genre_by_year"] = compute_genre_by_year(df)
     d["creator_2026"] = compute_creator_2026(df)
     d["performance_2026"] = compute_performance_2026(df)
+    d["recent_videos_retention"] = compute_recent_videos_retention(df, weeks=4)
     d["top100"] = compute_top100(df)
     d["quarterly"] = compute_quarterly(df)
     d["format_performance"] = compute_format_performance(df)
