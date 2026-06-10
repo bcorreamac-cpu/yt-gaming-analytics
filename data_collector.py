@@ -80,14 +80,19 @@ def authenticate():
 # Rate limiting con exponential backoff
 # ---------------------------------------------------------------------------
 
-def api_call_with_backoff(request_func, max_retries=5):
-    """Ejecuta una llamada a la API con exponential backoff."""
+def api_call_with_backoff(request_func, max_retries=8):
+    """Ejecuta una llamada a la API con exponential backoff.
+    Más retries y waits más largos para sobrevivir al rate limit acumulado
+    de pulls masivos (analytics + retention + first_24h para >1000 videos).
+    """
     for attempt in range(max_retries):
         try:
             return request_func()
         except HttpError as e:
             if e.resp.status in (403, 429, 500, 503):
-                wait = (2 ** attempt) + random.uniform(0, 1)
+                # Base 3s para no quemar quota en retries rápidos consecutivos
+                wait = (3 * (2 ** attempt)) + random.uniform(0, 2)
+                wait = min(wait, 120)  # cap a 2 min
                 print(f"\n  Rate limit/error (HTTP {e.resp.status}). "
                       f"Reintentando en {wait:.1f}s (intento {attempt + 1}/{max_retries})...")
                 time.sleep(wait)
