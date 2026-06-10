@@ -276,7 +276,7 @@ tr:hover td{background:var(--bg3)}
 <div class="cd"><h3><span class="dt" style="background:var(--a2)"></span>1) Average View Duration (segundos)</h3><div class="cb" style="height:340px"><canvas id="c-velo-avd"></canvas></div></div>
 <div class="cd"><h3><span class="dt" style="background:var(--a3)"></span>2) Retención 30 segundos (%)</h3><div class="cb" style="height:340px"><canvas id="c-velo-r30"></canvas></div></div>
 <div class="cd"><h3><span class="dt" style="background:var(--a4)"></span>3) Retención 60 segundos / 1 minuto (%)</h3><div class="cb" style="height:340px"><canvas id="c-velo-r60"></canvas></div></div>
-<div class="cd"><h3><span class="dt" style="background:var(--a1)"></span>4) Views por minuto — primeras 24 horas</h3><div class="ex">Views totales en las primeras 24h ÷ 1440 minutos. Mide velocidad inicial: cuán rápido despegó el video el día de publicación. Para videos publicados hace &lt;24h o sin data: la barra queda vacía.</div><div class="cb" style="height:340px"><canvas id="c-velo-vpm"></canvas></div></div>
+<div class="cd"><h3><span class="dt" style="background:var(--a1)"></span>4) Views totales en las primeras 24 horas</h3><div class="ex">Cuántas views acumuló cada video durante sus primeras 24 horas tras publicación. Mide la velocidad inicial: cuán rápido despegó el video el día de salida. Para videos publicados hace &lt;24h o sin data en la API: la barra queda vacía.</div><div class="cb" style="height:340px"><canvas id="c-velo-vpm"></canvas></div></div>
 </div>
 
 <div id="v-audit" class="vw">
@@ -753,17 +753,18 @@ if(q3y.length){
   var avdData=vids.map(function(v){return v.avg_avd_sec||0});
   var r30Data=vids.map(function(v){return v.retention_30s||0});
   var r60Data=vids.map(function(v){return v.retention_1min||0});
-  var vpmData=vids.map(function(v){return v.views_per_minute_24h||0});
+  var vpmData=vids.map(function(v){return v.first_24h_views||0});
   new Chart(document.getElementById("c-velo-avd"),{type:"bar",data:{labels:labels,datasets:[{label:"AVD (s)",data:avdData,backgroundColor:"#00B894",borderRadius:4}]},options:mkOpt("s")});
   new Chart(document.getElementById("c-velo-r30"),{type:"bar",data:{labels:labels,datasets:[{label:"Ret 30s (%)",data:r30Data,backgroundColor:"#6C5CE7",borderRadius:4}]},options:mkOpt("%",100)});
   new Chart(document.getElementById("c-velo-r60"),{type:"bar",data:{labels:labels,datasets:[{label:"Ret 1min (%)",data:r60Data,backgroundColor:"#FDCB6E",borderRadius:4}]},options:mkOpt("%",100)});
-  new Chart(document.getElementById("c-velo-vpm"),{type:"bar",data:{labels:labels,datasets:[{label:"Views/min en primeras 24h",data:vpmData,backgroundColor:"#FF4444",borderRadius:4}]},options:mkOpt(" v/min")});
+  new Chart(document.getElementById("c-velo-vpm"),{type:"bar",data:{labels:labels,datasets:[{label:"Views primeras 24h",data:vpmData,backgroundColor:"#FF4444",borderRadius:4}]},options:mkOpt(" views")});
   var meta=document.getElementById("velo-meta");
   if(meta){
     var n24=vids.filter(function(v){return v.first_24h_views!=null}).length;
     meta.innerHTML="Videos en ventana: <b>"+vids.length+"</b> (orden cronológico izquierda→derecha). Con data de primeras 24h: <b>"+n24+"</b>.";
   }
 })();
+
 
 
 
