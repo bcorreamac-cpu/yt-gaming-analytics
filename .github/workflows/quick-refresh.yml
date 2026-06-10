@@ -1,0 +1,72 @@
+name: Quick Refresh — auto-detect new videos
+
+on:
+  schedule:
+    # Cada 30 min. GitHub Actions cron tiene drift de ~10-15 min en horas pico.
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check-and-refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install minimal dependencies (for check step)
+        run: |
+          pip install --upgrade pip
+          pip install pandas google-api-python-client google-auth-oauthlib google-auth-httplib2
+
+      - name: Restore YouTube API token
+        env:
+          YOUTUBE_TOKEN_B64: ${{ secrets.YOUTUBE_TOKEN_B64 }}
+        run: |
+          echo "$YOUTUBE_TOKEN_B64" | base64 -d > token.pickle
+
+      - name: Detect new videos
+        id: check
+        run: |
+          result=$(python check_new_videos.py)
+          echo "result=$result" >> $GITHUB_OUTPUT
+          echo "Detection result: $result"
+
+      - name: Install full pipeline dependencies (only if needed)
+        if: steps.check.outputs.result == 'yes'
+        run: |
+          pip install numpy isodate thefuzz openpyxl tqdm xgboost scikit-learn
+
+      - name: Run full pipeline (only if new videos)
+        if: steps.check.outputs.result == 'yes'
+        run: |
+          python data_collector.py
+          python categorizer.py
+          python audit_validator.py
+          python recompute_aggregates.py
+          python rebuild_dashboard.py
+          python build_metrics.py
+
+      - name: Commit and push (only if new videos)
+        if: steps.check.outputs.result == 'yes'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          rm -f token.pickle
+          git add strategic_data.json strategic_dashboard.html metrics.html audit_report.html videos_raw_data.csv videos_categorized.csv
+          git diff --staged --quiet || git commit -m "Auto: Quick refresh $(date -u +%Y-%m-%d_%H:%M)_UTC (new video detected)"
+          git push
+
+      - name: Cleanup if no new videos
+        if: steps.check.outputs.result != 'yes'
+        run: |
+          rm -f token.pickle
+          echo "Sin novedades. Pipeline skipped."
